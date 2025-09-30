@@ -11,7 +11,11 @@ This repository implements a Linux background process that monitors a Minecraft 
   - AND no user has been logged in for the last 10 minutes
   - THEN shut down the Minecraft server
 
+## Implementation
+- **Language**: Go - see [language choice rationale](doc/reference/language-choice.md)
+
 ## References
+- [Language Choice](doc/reference/language-choice.md) - Why Go was selected
 - [Minecraft Server Management Protocol](doc/reference/server-management-protocol.md) - Local reference documentation
 - [Official Protocol Documentation](https://minecraft.wiki/w/Minecraft_Server_Management_Protocol) - Original source
 
