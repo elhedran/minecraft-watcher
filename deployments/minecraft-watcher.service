@@ -1,0 +1,27 @@
+[Unit]
+Description=Minecraft Server Auto-Shutdown Monitor
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minecraft
+Group=minecraft
+ExecStart=/usr/local/bin/minecraft-watcher
+Restart=on-failure
+RestartSec=10s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/minecraft-watcher
+
+# Environment
+Environment="MINECRAFT_MGMT_HOST=localhost"
+Environment="MINECRAFT_MGMT_PORT=25566"
+EnvironmentFile=-/etc/minecraft-watcher/config
+
+[Install]
+WantedBy=multi-user.target

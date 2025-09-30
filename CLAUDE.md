@@ -29,3 +29,7 @@ This repository implements a Linux background process that monitors a Minecraft 
 3. **Track progress** - As the feature is implemented:
    - Update the feature document to indicate completed parts
    - Mark implementation status for each component/step
+4. **Ensure consistency before committing** - Before each commit:
+   - Verify all documentation is consistent (README.md, CLAUDE.md, reference docs)
+   - Check version numbers, dependencies, and specifications match across files
+   - Update any outdated references or instructions
