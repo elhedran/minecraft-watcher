@@ -51,6 +51,20 @@ Inbound Rules:
 
 The watcher runs on the same machine and connects via `localhost`, so no external access to the management port is needed.
 
+### Verify Management Port Security
+
+After configuring your firewall/security group, verify that the management port is not publicly accessible:
+
+```bash
+# Test from an external machine (NOT from the server itself)
+nc -zv -w 3 your-minecraft-server.example.com 25575
+
+# Expected result: Connection should timeout or be refused
+# If it connects successfully, the port is exposed - reconfigure your firewall!
+```
+
+**Important:** Test from a different machine than your Minecraft server. Testing from localhost will always succeed.
+
 ## Building
 
 ### Local Build (same architecture)
