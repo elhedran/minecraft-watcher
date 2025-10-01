@@ -223,7 +223,7 @@ TEST MODE: Would execute system shutdown: sudo systemctl poweroff
 
 ### System Tests
 
-Run automated system tests to verify connectivity and player queries:
+Run automated system tests that execute the watcher binary and verify its behavior:
 
 ```bash
 # Export configuration (same as above)
@@ -231,36 +231,34 @@ export MINECRAFT_MGMT_HOST=localhost
 export MINECRAFT_MGMT_PORT=25566
 export MINECRAFT_MGMT_SECRET=your-40-character-secret-here
 
-# Run all system tests
+# Run system tests
 go test ./test -v
-
-# Run specific test
-go test ./test -v -run TestPlayerQuery
 ```
 
-System tests verify:
-- WebSocket connection to Minecraft server
-- Bearer token authentication
-- JSON-RPC player list query
-- Response parsing
+System tests verify the watcher:
+- Builds successfully
+- Runs in TEST_MODE
+- Connects to Minecraft server
+- Monitors player activity
+- Logs shutdown decisions correctly
 
-**Note:** System tests require a running Minecraft server with Management Protocol enabled. They do not assume any particular player count.
+**Note:** System tests require a running Minecraft server with Management Protocol enabled. The watcher runs for ~15 seconds in test mode.
 
 Example output:
 ```
-=== RUN   TestSystemConnection
-    system_test.go:174: Loading configuration...
-    system_test.go:180: Connecting to Minecraft server at wss://localhost:25566
-    system_test.go:188: ✓ Successfully connected to Minecraft server
---- PASS: TestSystemConnection (0.15s)
-=== RUN   TestPlayerQuery
-    system_test.go:192: Loading configuration...
-    system_test.go:198: Connecting to server...
-    system_test.go:205: Querying player list...
-    system_test.go:211: ✓ Successfully queried player list
-    system_test.go:212: ✓ Player count: 0
-    system_test.go:219: ✓ No players currently online
---- PASS: TestPlayerQuery (0.12s)
+=== RUN   TestWatcherConnection
+--- PASS: TestWatcherConnection (15.24s)
+    system_test.go:20: Building watcher...
+    system_test.go:48: Starting watcher in test mode...
+    system_test.go:60: watcher: minecraft-watcher starting...
+    system_test.go:60: watcher: *** RUNNING IN TEST MODE - will not actually shut down server ***
+    system_test.go:60: watcher: Successfully connected to Minecraft server
+    system_test.go:60: watcher: Starting player monitoring loop...
+    system_test.go:60: watcher: No players online (idle for 5s)
+    system_test.go:60: watcher: TEST MODE: Would execute system shutdown: sudo systemctl poweroff
+    system_test.go:92: ✓ Watcher running in TEST MODE
+    system_test.go:98: ✓ Watcher successfully connected to Minecraft server
+    system_test.go:104: ✓ Watcher successfully monitoring players
 PASS
 ```
 

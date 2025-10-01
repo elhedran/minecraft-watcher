@@ -1,212 +1,112 @@
 package test
 
 import (
-	"crypto/tls"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/url"
+	"bufio"
+	"context"
 	"os"
-	"strconv"
-	"sync/atomic"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
-type Config struct {
-	Host       string
-	Port       string
-	Secret     string
-	TLSEnabled bool
-}
-
-type JSONRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	Method  string      `json:"method"`
-	ID      int         `json:"id"`
-	Params  interface{} `json:"params,omitempty"`
-}
-
-type JSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
-}
-
-type JSONRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    string `json:"data,omitempty"`
-}
-
-type PlayersResult struct {
-	Players []Player `json:"players"`
-}
-
-type Player struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-func loadConfig() (*Config, error) {
-	cfg := &Config{
-		Host:       getEnv("MINECRAFT_MGMT_HOST", "localhost"),
-		Port:       getEnv("MINECRAFT_MGMT_PORT", "25566"),
-		Secret:     os.Getenv("MINECRAFT_MGMT_SECRET"),
-		TLSEnabled: getEnvBool("MINECRAFT_MGMT_TLS_ENABLED", true),
+func TestWatcherConnection(t *testing.T) {
+	// Check required environment variables
+	if os.Getenv("MINECRAFT_MGMT_SECRET") == "" {
+		t.Skip("MINECRAFT_MGMT_SECRET not set, skipping system test")
 	}
 
-	if cfg.Secret == "" {
-		return nil, fmt.Errorf("MINECRAFT_MGMT_SECRET is required")
+	// Build the watcher if not already built
+	t.Log("Building watcher...")
+	buildCmd := exec.Command("go", "build", "-o", "../minecraft-watcher", "../cmd/minecraft-watcher")
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to build watcher: %v\n%s", err, output)
 	}
 
-	return cfg, nil
-}
+	// Set up environment for test mode
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	cmd := exec.CommandContext(ctx, "../minecraft-watcher")
+	cmd.Env = append(os.Environ(),
+		"TEST_MODE=true",
+		"POLL_INTERVAL_SECONDS=5",
+		"MIN_UPTIME_MINUTES=0",
+		"IDLE_TIMEOUT_MINUTES=0",
+	)
+
+	// Capture output
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("Failed to get stdout pipe: %v", err)
 	}
-	return defaultValue
-}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("Failed to get stderr pipe: %v", err)
+	}
 
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if b, err := strconv.ParseBool(value); err == nil {
-			return b
+	t.Log("Starting watcher in test mode...")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Failed to start watcher: %v", err)
+	}
+
+	// Collect output
+	var foundTestMode, foundConnection, foundMonitoring bool
+	scanner := bufio.NewScanner(stderr)
+
+	go func() {
+		for scanner.Scan() {
+			line := scanner.Text()
+			t.Logf("watcher: %s", line)
+
+			if strings.Contains(line, "TEST MODE") {
+				foundTestMode = true
+			}
+			if strings.Contains(line, "Successfully connected") {
+				foundConnection = true
+			}
+			if strings.Contains(line, "Players online") || strings.Contains(line, "No players online") {
+				foundMonitoring = true
+			}
 		}
-	}
-	return defaultValue
-}
+	}()
 
-func connectToServer(cfg *Config) (*websocket.Conn, error) {
-	scheme := "ws"
-	if cfg.TLSEnabled {
-		scheme = "wss"
-	}
-
-	u := url.URL{
-		Scheme: scheme,
-		Host:   fmt.Sprintf("%s:%s", cfg.Host, cfg.Port),
-		Path:   "/",
-	}
-
-	header := http.Header{}
-	header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.Secret))
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-
-	if cfg.TLSEnabled {
-		dialer.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true,
+	// Also capture stdout (shouldn't have much)
+	go func() {
+		scannerOut := bufio.NewScanner(stdout)
+		for scannerOut.Scan() {
+			t.Logf("watcher stdout: %s", scannerOut.Text())
 		}
-	}
+	}()
 
-	conn, _, err := dialer.Dial(u.String(), header)
-	if err != nil {
-		return nil, err
-	}
+	// Wait for process or timeout
+	<-ctx.Done()
 
-	return conn, nil
-}
+	// Give it a moment to flush logs
+	time.Sleep(100 * time.Millisecond)
 
-var requestID int64
-
-func sendJSONRPC(conn *websocket.Conn, method string, params interface{}) (*JSONRPCResponse, error) {
-	id := int(atomic.AddInt64(&requestID, 1))
-
-	req := JSONRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		ID:      id,
-		Params:  params,
-	}
-
-	if err := conn.WriteJSON(req); err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	var resp JSONRPCResponse
-	if err := conn.ReadJSON(&resp); err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.Error != nil {
-		return nil, fmt.Errorf("JSON-RPC error %d: %s (data: %s)",
-			resp.Error.Code, resp.Error.Message, resp.Error.Data)
-	}
-
-	return &resp, nil
-}
-
-func getPlayers(conn *websocket.Conn) ([]Player, error) {
-	resp, err := sendJSONRPC(conn, "minecraft:players", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var players []Player
-	if err := json.Unmarshal(resp.Result, &players); err != nil {
-		return nil, fmt.Errorf("failed to parse players result: %w", err)
-	}
-
-	return players, nil
-}
-
-func TestSystemConnection(t *testing.T) {
-	t.Log("Loading configuration...")
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("Configuration error: %v", err)
-	}
-
-	t.Logf("Connecting to Minecraft server at %s://%s:%s",
-		map[bool]string{true: "wss", false: "ws"}[cfg.TLSEnabled],
-		cfg.Host, cfg.Port)
-
-	conn, err := connectToServer(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect to server: %v", err)
-	}
-	defer conn.Close()
-
-	t.Log("✓ Successfully connected to Minecraft server")
-}
-
-func TestPlayerQuery(t *testing.T) {
-	t.Log("Loading configuration...")
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("Configuration error: %v", err)
-	}
-
-	t.Log("Connecting to server...")
-	conn, err := connectToServer(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect to server: %v", err)
-	}
-	defer conn.Close()
-
-	t.Log("Querying player list...")
-	players, err := getPlayers(conn)
-	if err != nil {
-		t.Fatalf("Failed to query players: %v", err)
-	}
-
-	t.Logf("✓ Successfully queried player list")
-	t.Logf("✓ Player count: %d", len(players))
-
-	if len(players) > 0 {
-		t.Log("✓ Players online:")
-		for _, player := range players {
-			t.Logf("  - %s (UUID: %s)", player.Name, player.ID)
-		}
+	// Verify expectations
+	if !foundTestMode {
+		t.Error("✗ Watcher did not indicate TEST MODE")
 	} else {
-		t.Log("✓ No players currently online")
+		t.Log("✓ Watcher running in TEST MODE")
 	}
+
+	if !foundConnection {
+		t.Error("✗ Watcher did not successfully connect to Minecraft server")
+	} else {
+		t.Log("✓ Watcher successfully connected to Minecraft server")
+	}
+
+	if !foundMonitoring {
+		t.Error("✗ Watcher did not query player information")
+	} else {
+		t.Log("✓ Watcher successfully monitoring players")
+	}
+
+	// Clean up
+	if err := cmd.Process.Kill(); err != nil {
+		t.Logf("Warning: failed to kill process: %v", err)
+	}
+	cmd.Wait()
 }
