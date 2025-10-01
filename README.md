@@ -27,11 +27,29 @@ Enable the Management Protocol in your server's `server.properties`:
 ```properties
 management-server-enabled=true
 management-server-host=localhost
-management-server-port=25566
+management-server-port=25575
 management-server-secret=<40-character-alphanumeric-secret>
+management-server-tls-enabled=false
 ```
 
 The secret will be auto-generated if empty on first startup.
+
+### Security Note: Management Port
+
+**Important:** The management port (25575) should **NOT** be exposed in your EC2 security group or firewall. This allows:
+- TLS to be disabled (simpler configuration)
+- Watcher connects via localhost/private network only
+- Management API remains inaccessible from internet
+
+**Security Group Configuration:**
+```
+Inbound Rules:
+- Port 25565 (TCP) - 0.0.0.0/0 - Minecraft gameplay
+- Port 22 (TCP) - YOUR_IP/32 - SSH access
+- Port 25575 - NOT INCLUDED - Management (local only)
+```
+
+The watcher runs on the same machine and connects via `localhost`, so no external access to the management port is needed.
 
 ## Building
 
@@ -107,13 +125,15 @@ sudo mkdir -p /etc/minecraft-watcher
 # Create configuration file
 sudo tee /etc/minecraft-watcher/config << EOF
 MINECRAFT_MGMT_HOST=localhost
-MINECRAFT_MGMT_PORT=25566
+MINECRAFT_MGMT_PORT=25575
 MINECRAFT_MGMT_SECRET=your-40-character-secret-here
-MINECRAFT_MGMT_TLS_ENABLED=true
+MINECRAFT_MGMT_TLS_ENABLED=false
 EOF
 
 sudo chmod 600 /etc/minecraft-watcher/config
 ```
+
+**Note:** Use the same secret from your Minecraft `server.properties` file.
 
 ### 3. Create User (if needed)
 
@@ -175,9 +195,9 @@ Configuration is done via environment variables, either in `/etc/minecraft-watch
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MINECRAFT_MGMT_HOST` | `localhost` | Management API host |
-| `MINECRAFT_MGMT_PORT` | `25566` | Management API port |
+| `MINECRAFT_MGMT_PORT` | `25575` | Management API port (use 25575, not exposed publicly) |
 | `MINECRAFT_MGMT_SECRET` | (required) | 40-character authentication secret |
-| `MINECRAFT_MGMT_TLS_ENABLED` | `true` | Enable TLS connection |
+| `MINECRAFT_MGMT_TLS_ENABLED` | `false` | Enable TLS (false when port not exposed) |
 | `TEST_MODE` | `false` | When true, logs shutdown decisions without executing |
 | `IDLE_TIMEOUT_MINUTES` | `10` | Minutes of no players before shutdown |
 | `MIN_UPTIME_MINUTES` | `30` | Minimum server uptime before allowing shutdown |
@@ -190,8 +210,9 @@ To test the watcher without actually shutting down your server, use **test mode*
 ```bash
 # Export configuration
 export MINECRAFT_MGMT_HOST=localhost
-export MINECRAFT_MGMT_PORT=25566
+export MINECRAFT_MGMT_PORT=25575
 export MINECRAFT_MGMT_SECRET=your-40-character-secret-here
+export MINECRAFT_MGMT_TLS_ENABLED=false
 export TEST_MODE=true
 
 # Optional: adjust timing for faster testing
@@ -228,8 +249,9 @@ Run automated system tests that execute the watcher binary and verify its behavi
 ```bash
 # Export configuration (same as above)
 export MINECRAFT_MGMT_HOST=localhost
-export MINECRAFT_MGMT_PORT=25566
+export MINECRAFT_MGMT_PORT=25575
 export MINECRAFT_MGMT_SECRET=your-40-character-secret-here
+export MINECRAFT_MGMT_TLS_ENABLED=false
 
 # Run system tests
 go test ./test -v
