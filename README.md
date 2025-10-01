@@ -1,16 +1,17 @@
 # Minecraft Server Auto-Shutdown Monitor
 
-A lightweight Linux daemon that monitors a Minecraft server and automatically shuts it down when idle to save resources.
+A lightweight Linux daemon that monitors a Minecraft server and automatically shuts down the entire system when idle to save cloud costs.
 
 ## Features
 
 - Monitors Minecraft server using the [Server Management Protocol](https://minecraft.wiki/w/Minecraft_Server_Management_Protocol)
-- Automatic shutdown when:
+- Automatic **system shutdown** when:
   - Server has been running for more than 30 minutes
   - No players have been online for the last 10 minutes
 - Runs as a systemd service
 - Low resource footprint
 - Single binary with no runtime dependencies
+- Ideal for cloud environments (AWS EC2, etc.) to minimize costs
 
 ## Requirements
 
@@ -121,7 +122,24 @@ sudo chmod 600 /etc/minecraft-watcher/config
 sudo useradd -r -s /bin/false minecraft
 ```
 
-### 4. Install Systemd Service
+### 4. Configure Shutdown Permissions
+
+**IMPORTANT:** The watcher needs permission to shut down the system when idle conditions are met.
+
+```bash
+# Install sudoers configuration
+sudo cp deployments/minecraft-watcher-sudoers /etc/sudoers.d/minecraft-watcher
+sudo chmod 440 /etc/sudoers.d/minecraft-watcher
+
+# Verify syntax (important!)
+sudo visudo -c
+```
+
+This grants the `minecraft` user passwordless sudo access to execute `systemctl poweroff` only.
+
+**Security Note:** The watcher will shut down the entire system (not just the Minecraft server) when idle conditions are met. Always test with `TEST_MODE=true` first to verify the shutdown logic before deploying to production.
+
+### 5. Install Systemd Service
 
 ```bash
 # Copy service file
@@ -140,7 +158,7 @@ sudo systemctl start minecraft-watcher
 sudo systemctl status minecraft-watcher
 ```
 
-### 5. View Logs
+### 6. View Logs
 
 ```bash
 # Follow logs in real-time
@@ -189,8 +207,9 @@ In test mode, the watcher will:
 - Connect to the server and monitor players normally
 - Log all player activity and idle times
 - Display when shutdown conditions are met
-- Log `TEST MODE: Would execute server shutdown now` instead of actually shutting down
+- Log `TEST MODE: Would execute system shutdown: sudo systemctl poweroff` instead of actually shutting down
 - Continue running after "shutdown" (won't exit)
+- **Does NOT require sudo permissions** (safe to test as any user)
 
 Example test mode output:
 ```
@@ -199,7 +218,7 @@ Players online (0): []
 No players online (idle for 2m30s)
 Status: uptime=5m, idle=2m (thresholds: min_uptime=1m, idle_timeout=2m)
 Shutdown conditions met: uptime=5m >= 1m AND idle=2m >= 2m
-TEST MODE: Would execute server shutdown now
+TEST MODE: Would execute system shutdown: sudo systemctl poweroff
 ```
 
 ### System Tests

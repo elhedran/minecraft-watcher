@@ -1,0 +1,14 @@
+# Sudoers configuration for minecraft-watcher
+# This file should be installed to /etc/sudoers.d/minecraft-watcher
+#
+# Installation:
+#   sudo cp deployments/minecraft-watcher-sudoers /etc/sudoers.d/minecraft-watcher
+#   sudo chmod 440 /etc/sudoers.d/minecraft-watcher
+#   sudo visudo -c  # Validate syntax
+#
+# This grants the minecraft user permission to shut down the system
+# without a password prompt when idle conditions are met.
+
+# Allow minecraft user to execute system poweroff command
+minecraft ALL=(ALL) NOPASSWD: /bin/systemctl poweroff
+minecraft ALL=(ALL) NOPASSWD: /usr/bin/systemctl poweroff

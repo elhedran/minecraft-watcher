@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"sync/atomic"
@@ -247,19 +248,20 @@ func getPlayers(conn *websocket.Conn) ([]Player, error) {
 	return players, nil
 }
 
-func shutdownServer(conn *websocket.Conn, testMode bool) error {
+func shutdownSystem(testMode bool) error {
 	if testMode {
-		log.Println("TEST MODE: Would execute server shutdown now")
+		log.Println("TEST MODE: Would execute system shutdown: sudo systemctl poweroff")
 		return nil
 	}
 
-	log.Println("Sending shutdown command to server...")
-	_, err := sendJSONRPC(conn, "minecraft:server/stop", nil)
-	if err != nil {
-		return fmt.Errorf("failed to shutdown server: %w", err)
+	log.Println("Idle timeout reached. Shutting down system...")
+	cmd := exec.Command("sudo", "systemctl", "poweroff")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to shutdown system: %w", err)
 	}
 
-	log.Println("Server shutdown command sent successfully")
+	log.Println("System shutdown command executed")
 	return nil
 }
 
@@ -310,13 +312,13 @@ func monitorPlayers(ctx context.Context, conn *websocket.Conn, cfg *Config) {
 				log.Printf("Shutdown conditions met: uptime=%dm >= %dm AND idle=%dm >= %dm",
 					uptimeMinutes, cfg.MinUptimeMinutes, idleMinutes, cfg.IdleTimeoutMinutes)
 
-				if err := shutdownServer(conn, cfg.TestMode); err != nil {
-					log.Printf("Error shutting down server: %v", err)
+				if err := shutdownSystem(cfg.TestMode); err != nil {
+					log.Printf("Error shutting down system: %v", err)
 					continue
 				}
 
 				if !cfg.TestMode {
-					log.Println("Server shutdown initiated. Exiting.")
+					log.Println("System shutdown initiated. Exiting.")
 					os.Exit(0)
 				}
 			}
