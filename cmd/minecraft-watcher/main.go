@@ -2,30 +2,69 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type Config struct {
-	Host       string
-	Port       string
-	Secret     string
-	TLSEnabled bool
+	Host                string
+	Port                string
+	Secret              string
+	TLSEnabled          bool
+	TestMode            bool
+	IdleTimeoutMinutes  int
+	MinUptimeMinutes    int
+	PollIntervalSeconds int
+}
+
+type JSONRPCRequest struct {
+	JSONRPC string      `json:"jsonrpc"`
+	Method  string      `json:"method"`
+	ID      int         `json:"id"`
+	Params  interface{} `json:"params,omitempty"`
+}
+
+type JSONRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitempty"`
+}
+
+type JSONRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    string `json:"data,omitempty"`
+}
+
+type PlayersResult struct {
+	Players []Player `json:"players"`
+}
+
+type Player struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 func loadConfig() (*Config, error) {
 	cfg := &Config{
-		Host:       getEnv("MINECRAFT_MGMT_HOST", "localhost"),
-		Port:       getEnv("MINECRAFT_MGMT_PORT", "25566"),
-		Secret:     os.Getenv("MINECRAFT_MGMT_SECRET"),
-		TLSEnabled: getEnvBool("MINECRAFT_MGMT_TLS_ENABLED", true),
+		Host:                getEnv("MINECRAFT_MGMT_HOST", "localhost"),
+		Port:                getEnv("MINECRAFT_MGMT_PORT", "25566"),
+		Secret:              os.Getenv("MINECRAFT_MGMT_SECRET"),
+		TLSEnabled:          getEnvBool("MINECRAFT_MGMT_TLS_ENABLED", true),
+		TestMode:            getEnvBool("TEST_MODE", false),
+		IdleTimeoutMinutes:  getEnvInt("IDLE_TIMEOUT_MINUTES", 10),
+		MinUptimeMinutes:    getEnvInt("MIN_UPTIME_MINUTES", 30),
+		PollIntervalSeconds: getEnvInt("POLL_INTERVAL_SECONDS", 30),
 	}
 
 	if cfg.Secret == "" {
@@ -51,6 +90,15 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.Atoi(value); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
 func main() {
 	log.Println("minecraft-watcher starting...")
 
@@ -59,15 +107,19 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	log.Printf("Configuration loaded: host=%s, port=%s, tls=%v", cfg.Host, cfg.Port, cfg.TLSEnabled)
+	if cfg.TestMode {
+		log.Println("*** RUNNING IN TEST MODE - will not actually shut down server ***")
+	}
+
+	log.Printf("Configuration: host=%s, port=%s, tls=%v, idle_timeout=%dm, min_uptime=%dm, poll_interval=%ds",
+		cfg.Host, cfg.Port, cfg.TLSEnabled, cfg.IdleTimeoutMinutes, cfg.MinUptimeMinutes, cfg.PollIntervalSeconds)
 
 	conn := connectWithRetry(cfg)
 	defer conn.Close()
 
 	log.Println("minecraft-watcher ready - connected to server")
 
-	// Keep running
-	select {}
+	monitorPlayers(conn, cfg)
 }
 
 func connectWithRetry(cfg *Config) *websocket.Conn {
@@ -130,4 +182,121 @@ func connectToServer(cfg *Config) (*websocket.Conn, error) {
 	}
 
 	return conn, nil
+}
+
+var requestID int64
+
+func sendJSONRPC(conn *websocket.Conn, method string, params interface{}) (*JSONRPCResponse, error) {
+	id := int(atomic.AddInt64(&requestID, 1))
+
+	req := JSONRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		ID:      id,
+		Params:  params,
+	}
+
+	if err := conn.WriteJSON(req); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	var resp JSONRPCResponse
+	if err := conn.ReadJSON(&resp); err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("JSON-RPC error %d: %s (data: %s)",
+			resp.Error.Code, resp.Error.Message, resp.Error.Data)
+	}
+
+	return &resp, nil
+}
+
+func getPlayers(conn *websocket.Conn) ([]Player, error) {
+	resp, err := sendJSONRPC(conn, "minecraft:players/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result PlayersResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse players result: %w", err)
+	}
+
+	return result.Players, nil
+}
+
+func shutdownServer(conn *websocket.Conn, testMode bool) error {
+	if testMode {
+		log.Println("TEST MODE: Would execute server shutdown now")
+		return nil
+	}
+
+	log.Println("Sending shutdown command to server...")
+	_, err := sendJSONRPC(conn, "minecraft:server/stop", nil)
+	if err != nil {
+		return fmt.Errorf("failed to shutdown server: %w", err)
+	}
+
+	log.Println("Server shutdown command sent successfully")
+	return nil
+}
+
+func monitorPlayers(conn *websocket.Conn, cfg *Config) {
+	startTime := time.Now()
+	lastPlayerTime := time.Now()
+	ticker := time.NewTicker(time.Duration(cfg.PollIntervalSeconds) * time.Second)
+	defer ticker.Stop()
+
+	log.Println("Starting player monitoring loop...")
+
+	for {
+		select {
+		case <-ticker.C:
+			players, err := getPlayers(conn)
+			if err != nil {
+				log.Printf("Error getting players: %v", err)
+				continue
+			}
+
+			playerCount := len(players)
+			if playerCount > 0 {
+				lastPlayerTime = time.Now()
+				playerNames := make([]string, len(players))
+				for i, p := range players {
+					playerNames[i] = p.Name
+				}
+				log.Printf("Players online (%d): %v", playerCount, playerNames)
+			} else {
+				timeSinceLastPlayer := time.Since(lastPlayerTime)
+				log.Printf("No players online (idle for %v)", timeSinceLastPlayer.Round(time.Second))
+			}
+
+			// Check shutdown conditions
+			uptime := time.Since(startTime)
+			timeSinceLastPlayer := time.Since(lastPlayerTime)
+
+			uptimeMinutes := int(uptime.Minutes())
+			idleMinutes := int(timeSinceLastPlayer.Minutes())
+
+			log.Printf("Status: uptime=%dm, idle=%dm (thresholds: min_uptime=%dm, idle_timeout=%dm)",
+				uptimeMinutes, idleMinutes, cfg.MinUptimeMinutes, cfg.IdleTimeoutMinutes)
+
+			if uptimeMinutes >= cfg.MinUptimeMinutes && idleMinutes >= cfg.IdleTimeoutMinutes {
+				log.Printf("Shutdown conditions met: uptime=%dm >= %dm AND idle=%dm >= %dm",
+					uptimeMinutes, cfg.MinUptimeMinutes, idleMinutes, cfg.IdleTimeoutMinutes)
+
+				if err := shutdownServer(conn, cfg.TestMode); err != nil {
+					log.Printf("Error shutting down server: %v", err)
+					continue
+				}
+
+				if !cfg.TestMode {
+					log.Println("Server shutdown initiated. Exiting.")
+					os.Exit(0)
+				}
+			}
+		}
+	}
 }

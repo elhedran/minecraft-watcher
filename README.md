@@ -124,8 +124,47 @@ Configuration is done via environment variables, either in `/etc/minecraft-watch
 | `MINECRAFT_MGMT_PORT` | `25566` | Management API port |
 | `MINECRAFT_MGMT_SECRET` | (required) | 40-character authentication secret |
 | `MINECRAFT_MGMT_TLS_ENABLED` | `true` | Enable TLS connection |
+| `TEST_MODE` | `false` | When true, logs shutdown decisions without executing |
 | `IDLE_TIMEOUT_MINUTES` | `10` | Minutes of no players before shutdown |
 | `MIN_UPTIME_MINUTES` | `30` | Minimum server uptime before allowing shutdown |
+| `POLL_INTERVAL_SECONDS` | `30` | Seconds between player checks |
+
+## Testing
+
+To test the watcher without actually shutting down your server, use **test mode**:
+
+```bash
+# Export configuration
+export MINECRAFT_MGMT_HOST=localhost
+export MINECRAFT_MGMT_PORT=25566
+export MINECRAFT_MGMT_SECRET=your-40-character-secret-here
+export TEST_MODE=true
+
+# Optional: adjust timing for faster testing
+export POLL_INTERVAL_SECONDS=10
+export IDLE_TIMEOUT_MINUTES=2
+export MIN_UPTIME_MINUTES=1
+
+# Run the watcher
+./minecraft-watcher
+```
+
+In test mode, the watcher will:
+- Connect to the server and monitor players normally
+- Log all player activity and idle times
+- Display when shutdown conditions are met
+- Log `TEST MODE: Would execute server shutdown now` instead of actually shutting down
+- Continue running after "shutdown" (won't exit)
+
+Example test mode output:
+```
+*** RUNNING IN TEST MODE - will not actually shut down server ***
+Players online (0): []
+No players online (idle for 2m30s)
+Status: uptime=5m, idle=2m (thresholds: min_uptime=1m, idle_timeout=2m)
+Shutdown conditions met: uptime=5m >= 1m AND idle=2m >= 2m
+TEST MODE: Would execute server shutdown now
+```
 
 ## Uninstallation
 
