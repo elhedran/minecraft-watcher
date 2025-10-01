@@ -214,17 +214,17 @@ func sendJSONRPC(conn *websocket.Conn, method string, params interface{}) (*JSON
 }
 
 func getPlayers(conn *websocket.Conn) ([]Player, error) {
-	resp, err := sendJSONRPC(conn, "minecraft:players/", nil)
+	resp, err := sendJSONRPC(conn, "minecraft:players", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var result PlayersResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
+	var players []Player
+	if err := json.Unmarshal(resp.Result, &players); err != nil {
 		return nil, fmt.Errorf("failed to parse players result: %w", err)
 	}
 
-	return result.Players, nil
+	return players, nil
 }
 
 func shutdownServer(conn *websocket.Conn, testMode bool) error {

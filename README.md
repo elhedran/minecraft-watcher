@@ -166,6 +166,49 @@ Shutdown conditions met: uptime=5m >= 1m AND idle=2m >= 2m
 TEST MODE: Would execute server shutdown now
 ```
 
+### System Tests
+
+Run automated system tests to verify connectivity and player queries:
+
+```bash
+# Export configuration (same as above)
+export MINECRAFT_MGMT_HOST=localhost
+export MINECRAFT_MGMT_PORT=25566
+export MINECRAFT_MGMT_SECRET=your-40-character-secret-here
+
+# Run all system tests
+go test ./test -v
+
+# Run specific test
+go test ./test -v -run TestPlayerQuery
+```
+
+System tests verify:
+- WebSocket connection to Minecraft server
+- Bearer token authentication
+- JSON-RPC player list query
+- Response parsing
+
+**Note:** System tests require a running Minecraft server with Management Protocol enabled. They do not assume any particular player count.
+
+Example output:
+```
+=== RUN   TestSystemConnection
+    system_test.go:174: Loading configuration...
+    system_test.go:180: Connecting to Minecraft server at wss://localhost:25566
+    system_test.go:188: ✓ Successfully connected to Minecraft server
+--- PASS: TestSystemConnection (0.15s)
+=== RUN   TestPlayerQuery
+    system_test.go:192: Loading configuration...
+    system_test.go:198: Connecting to server...
+    system_test.go:205: Querying player list...
+    system_test.go:211: ✓ Successfully queried player list
+    system_test.go:212: ✓ Player count: 0
+    system_test.go:219: ✓ No players currently online
+--- PASS: TestPlayerQuery (0.12s)
+PASS
+```
+
 ## Uninstallation
 
 ```bash
