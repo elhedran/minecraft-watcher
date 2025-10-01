@@ -34,6 +34,8 @@ The secret will be auto-generated if empty on first startup.
 
 ## Building
 
+### Local Build (same architecture)
+
 ```bash
 # Clone the repository
 git clone https://github.com/ianw/minecraft-watcher.git
@@ -46,7 +48,41 @@ go build -o minecraft-watcher ./cmd/minecraft-watcher
 go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
 ```
 
-The resulting binary is self-contained and can be deployed to any Linux system.
+### Cross-Compile for ARM-based AWS EC2 (Graviton)
+
+If you're building on a different architecture (e.g., x86_64) for deployment on ARM-based EC2 instances (e.g., t4g, c7g, m7g):
+
+```bash
+# Build for ARM64 (AWS Graviton processors)
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
+
+# Or for 32-bit ARM (older ARM instances)
+GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
+```
+
+### Architecture-Specific Builds
+
+```bash
+# For x86_64 / AMD64 (standard Intel/AMD servers)
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
+
+# For ARM64 (AWS Graviton, Raspberry Pi 64-bit, etc.)
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
+
+# For 32-bit ARM (Raspberry Pi 32-bit, older ARM devices)
+GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o minecraft-watcher ./cmd/minecraft-watcher
+```
+
+**Verify target architecture on EC2:**
+```bash
+uname -m
+# Output:
+#   x86_64  -> use GOARCH=amd64
+#   aarch64 -> use GOARCH=arm64
+#   armv7l  -> use GOARCH=arm
+```
+
+The resulting binary is self-contained and can be deployed to any Linux system matching the target architecture.
 
 ## Installation
 
