@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -8,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -114,12 +117,29 @@ func main() {
 	log.Printf("Configuration: host=%s, port=%s, tls=%v, idle_timeout=%dm, min_uptime=%dm, poll_interval=%ds",
 		cfg.Host, cfg.Port, cfg.TLSEnabled, cfg.IdleTimeoutMinutes, cfg.MinUptimeMinutes, cfg.PollIntervalSeconds)
 
+	// Setup signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		log.Printf("Received signal %v, shutting down gracefully...", sig)
+		cancel()
+	}()
+
 	conn := connectWithRetry(cfg)
-	defer conn.Close()
+	defer func() {
+		log.Println("Closing connection to Minecraft server...")
+		conn.Close()
+		log.Println("Shutdown complete")
+	}()
 
 	log.Println("minecraft-watcher ready - connected to server")
 
-	monitorPlayers(conn, cfg)
+	monitorPlayers(ctx, conn, cfg)
 }
 
 func connectWithRetry(cfg *Config) *websocket.Conn {
@@ -243,7 +263,7 @@ func shutdownServer(conn *websocket.Conn, testMode bool) error {
 	return nil
 }
 
-func monitorPlayers(conn *websocket.Conn, cfg *Config) {
+func monitorPlayers(ctx context.Context, conn *websocket.Conn, cfg *Config) {
 	startTime := time.Now()
 	lastPlayerTime := time.Now()
 	ticker := time.NewTicker(time.Duration(cfg.PollIntervalSeconds) * time.Second)
@@ -253,6 +273,9 @@ func monitorPlayers(conn *websocket.Conn, cfg *Config) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			log.Println("Monitoring stopped")
+			return
 		case <-ticker.C:
 			players, err := getPlayers(conn)
 			if err != nil {
