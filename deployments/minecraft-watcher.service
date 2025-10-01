@@ -20,7 +20,7 @@ ReadWritePaths=/var/log/minecraft-watcher
 
 # Environment
 Environment="MINECRAFT_MGMT_HOST=localhost"
-Environment="MINECRAFT_MGMT_PORT=25566"
+Environment="MINECRAFT_MGMT_PORT=25575"
 EnvironmentFile=-/etc/minecraft-watcher/config
 
 [Install]
