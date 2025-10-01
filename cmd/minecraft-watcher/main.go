@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -257,8 +258,11 @@ func shutdownSystem(testMode bool) error {
 	log.Println("Idle timeout reached. Shutting down system...")
 	cmd := exec.Command("sudo", "systemctl", "poweroff")
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to shutdown system: %w", err)
+		return fmt.Errorf("failed to shutdown system: %w (stderr: %s)", err, stderr.String())
 	}
 
 	log.Println("System shutdown command executed")
