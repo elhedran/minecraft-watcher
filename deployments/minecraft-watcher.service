@@ -13,7 +13,7 @@ RestartSec=10s
 TimeoutStopSec=5s
 
 # Security hardening
-NoNewPrivileges=true
+# NoNewPrivileges=true  # Disabled - prevents sudo from working
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
